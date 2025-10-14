@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音樂打擊遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            touch-action: manipulation; /* 禁用雙擊縮放 */
+        }
+        .game-container {
+            width: 100%;
+            max-width: 400px;
+            height: 90vh;
+            max-height: 800px;
+        }
+        .lane {
+            position: relative;
+            height: 100%;
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+            border-right: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .note {
+            position: absolute;
+            width: 90%;
+            left: 5%;
+            height: 25px;
+            border-radius: 8px;
+            will-change: transform;
+            transition: transform 4s linear; /* 4s 是音符從頂部到底部的時間 */
+        }
+        .target {
+            position: absolute;
+            bottom: 10%;
+            width: 100%;
+            height: 30px;
+            border-top: 2px solid;
+            opacity: 0.5;
+            box-shadow: 0 -5px 15px;
+        }
+        .target-key {
+            position: absolute;
+            bottom: 2%;
+            width: 80%;
+            left: 10%;
+            padding: 10px 0;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: white;
+            text-align: center;
+        }
+        .hit-effect {
+            position: absolute;
+            bottom: 10%;
+            width: 100%;
+            height: 30px;
+            transform: translateY(-50%);
+            border-radius: 8px;
+            opacity: 0;
+            animation: flash 0.3s ease-out;
+        }
+        @keyframes flash {
+            0% {
+                opacity: 0.8;
+                transform: scale(1, 1.2);
+            }
+            100% {
+                opacity: 0;
+                transform: scale(1.2, 1.5);
+            }
+        }
+        .feedback {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 3rem;
+            font-weight: bold;
+            color: white;
+            opacity: 0;
+            animation: fade-up 0.5s ease-out;
+        }
+        @keyframes fade-up {
+            0% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(0.8);
+            }
+            100% {
+                opacity: 0;
+                transform: translate(-50%, -100%) scale(1.2);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center h-screen overflow-hidden">
+
+    <div id="game-container" class="game-container bg-black shadow-2xl rounded-lg overflow-hidden relative">
+        <!-- 遊戲開始畫面 -->
+        <div id="start-screen" class="absolute inset-0 bg-gray-900/80 z-20 flex flex-col items-center justify-center p-8 text-center">
+            <h1 class="text-4xl font-bold mb-4">音樂打擊遊戲</h1>
+            <p class="text-lg text-gray-300 mb-8">當音符到達下方的打擊線時，按下對應的按鍵。</p>
+            <button id="start-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105">
+                開始遊戲
+            </button>
+            <div class="mt-8 text-gray-400">
+                <p>使用按鍵：</p>
+                <div class="flex space-x-4 mt-2">
+                    <kbd class="px-3 py-1 border rounded">D</kbd>
+                    <kbd class="px-3 py-1 border rounded">F</kbd>
+                    <kbd class="px-3 py-1 border rounded">J</kbd>
+                    <kbd class="px-3 py-1 border rounded">K</kbd>
+                </div>
+            </div>
+        </div>
+
+        <!-- 遊戲結束畫面 -->
+        <div id="end-screen" class="hidden absolute inset-0 bg-gray-900/80 z-20 flex flex-col items-center justify-center p-8 text-center">
+            <h2 class="text-3xl font-bold mb-2">遊戲結束</h2>
+            <p class="text-5xl font-bold mb-4" id="final-score">0</p>
+            <p class="text-xl mb-6" id="final-combo">最大連擊: 0</p>
+            <button id="restart-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105">
+                重新開始
+            </button>
+        </div>
+
+        <!-- 遊戲主畫面 -->
+        <div id="game-area" class="h-full w-full grid grid-cols-4 relative">
+            <!-- 分數和連擊顯示 -->
+            <div class="absolute top-4 left-1/2 -translate-x-1/2 text-center z-10">
+                <div id="score" class="text-3xl font-bold">0</div>
+                <div id="combo" class="text-xl text-purple-400 font-semibold h-8"></div>
+            </div>
+            
+            <div id="feedback-container" class="absolute w-full h-full pointer-events-none z-10"></div>
+
+            <!-- 四條軌道 -->
+            <div id="lane-0" class="lane">
+                <div class="target border-cyan-400 shadow-cyan-400/50"></div>
+                <div class="target-key bg-cyan-600/50">D</div>
+            </div>
+            <div id="lane-1" class="lane">
+                <div class="target border-pink-400 shadow-pink-400/50"></div>
+                <div class="target-key bg-pink-600/50">F</div>
+            </div>
+            <div id="lane-2" class="lane">
+                <div class="target border-yellow-400 shadow-yellow-400/50"></div>
+                <div class="target-key bg-yellow-600/50">J</div>
+            </div>
+            <div id="lane-3" class="lane">
+                <div class="target border-lime-400 shadow-lime-400/50"></div>
+                <div class="target-key bg-lime-600/50">K</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const gameArea = document.getElementById('game-area');
+        const lanes = [document.getElementById('lane-0'), document.getElementById('lane-1'), document.getElementById('lane-2'), document.getElementById('lane-3')];
+        const scoreDisplay = document.getElementById('score');
+        const comboDisplay = document.getElementById('combo');
+        const feedbackContainer = document.getElementById('feedback-container');
+        
+        const startScreen = document.getElementById('start-screen');
+        const endScreen = document.getElementById('end-screen');
+        const startButton = document.getElementById('start-button');
+        const restartButton = document.getElementById('restart-button');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const finalComboDisplay = document.getElementById('final-combo');
+
+        // 遊戲設定
+        const NOTE_SPEED = 4000; // ms, 音符從頂部到底部的時間
+        const HIT_WINDOW = 150; // ms, 完美打擊的時間窗口
+        const LANE_KEYS = ['d', 'f', 'j', 'k'];
+        const LANE_COLORS = ['bg-cyan-400', 'bg-pink-400', 'bg-yellow-400', 'bg-lime-400'];
+        const HIT_EFFECT_COLORS = ['bg-cyan-400', 'bg-pink-400', 'bg-yellow-400', 'bg-lime-400'];
+
+        // 遊戲狀態
+        let score = 0;
+        let combo = 0;
+        let maxCombo = 0;
+        let gameStartTime = 0;
+        let isGameRunning = false;
+        let songTimer;
+        let noteElements = [];
+
+        // 歌曲資料 (time: 毫秒, lane: 軌道索引)
+        const songChart = [
+            { time: 1000, lane: 0 }, { time: 1500, lane: 1 }, { time: 2000, lane: 2 }, { time: 2500, lane: 3 },
+            { time: 3000, lane: 0 }, { time: 3250, lane: 1 }, { time: 3500, lane: 2 },
+            { time: 4000, lane: 3 }, { time: 4500, lane: 2 }, { time: 5000, lane: 1 }, { time: 5500, lane: 0 },
+            { time: 6000, lane: 1 }, { time: 6250, lane: 2 }, { time: 6500, lane: 1 },
+            { time: 7000, lane: 0 }, { time: 7000, lane: 3 },
+            { time: 7800, lane: 1 }, { time: 8000, lane: 2 },
+            { time: 8800, lane: 0 }, { time: 9000, lane: 3 },
+            { time: 9800, lane: 1 }, { time: 9800, lane: 2 },
+            { time: 10500, lane: 0 }, { time: 11000, lane: 1 }, { time: 11500, lane: 2 }, { time: 12000, lane: 3 },
+            { time: 12500, lane: 0 }, { time: 12750, lane: 1 }, { time: 13000, lane: 2 },
+            { time: 13500, lane: 3 }, { time: 13750, lane: 2 }, { time: 14000, lane: 1 },
+            { time: 14500, lane: 0 }, { time: 14500, lane: 3 },
+            { time: 15000, lane: 1 }, { time: 15000, lane: 2 },
+        ];
+        
+        // 音效合成器
+        const synths = [
+            new Tone.Synth().toDestination(),
+            new Tone.Synth().toDestination(),
+            new Tone.Synth().toDestination(),
+            new Tone.Synth().toDestination(),
+        ];
+        synths[0].oscillator.type = "sine";
+        synths[1].oscillator.type = "triangle";
+        synths[2].oscillator.type = "square";
+        synths[3].oscillator.type = "sawtooth";
+        const hitNotes = ["C4", "E4", "G4", "B4"];
+
+        // 初始化遊戲
+        function init() {
+            score = 0;
+            combo = 0;
+            maxCombo = 0;
+            isGameRunning = false;
+            noteElements.forEach(note => note.remove());
+            noteElements = [];
+            clearTimeout(songTimer);
+            updateScore();
+            updateCombo();
+            endScreen.classList.add('hidden');
+            startScreen.classList.remove('hidden');
+        }
+
+        // 開始遊戲
+        function startGame() {
+            // 需要用戶互動才能啟動音訊
+            Tone.start(); 
+            
+            startScreen.classList.add('hidden');
+            isGameRunning = true;
+            gameStartTime = performance.now();
+
+            songChart.forEach(noteData => {
+                setTimeout(() => {
+                    if(isGameRunning) createNote(noteData.lane);
+                }, noteData.time);
+            });
+            
+            // 遊戲結束計時器
+            const gameDuration = songChart[songChart.length - 1].time + NOTE_SPEED + 500;
+            songTimer = setTimeout(endGame, gameDuration);
+        }
+
+        // 結束遊戲
+        function endGame() {
+            isGameRunning = false;
+            finalScoreDisplay.textContent = score;
+            finalComboDisplay.textContent = `最大連擊: ${maxCombo}`;
+            endScreen.classList.remove('hidden');
+        }
+
+        // 創建音符
+        function createNote(laneIndex) {
+            const note = document.createElement('div');
+            note.className = `note ${LANE_COLORS[laneIndex]}`;
+            note.style.transform = `translateY(-100%)`;
+            
+            // 附加其他數據到元素上
+            note.dataset.spawnTime = performance.now();
+            note.dataset.lane = laneIndex;
+
+            lanes[laneIndex].appendChild(note);
+            noteElements.push(note);
+
+            // 觸發CSS動畫
+            requestAnimationFrame(() => {
+                 note.style.transform = `translateY(calc(${gameArea.clientHeight}px))`;
+            });
+            
+            // 音符到達底部後自動移除 (如果未被擊中)
+            setTimeout(() => {
+                if (note.parentElement) {
+                    note.remove();
+                    noteElements = noteElements.filter(n => n !== note);
+                    if (isGameRunning) {
+                        breakCombo();
+                        showFeedback("MISS");
+                    }
+                }
+            }, NOTE_SPEED);
+        }
+        
+        // 處理玩家輸入
+        function handleKeyPress(e) {
+            if (!isGameRunning) return;
+            const key = e.key.toLowerCase();
+            const laneIndex = LANE_KEYS.indexOf(key);
+
+            if (laneIndex !== -1) {
+                checkHit(laneIndex);
+            }
+        }
+        
+        function handleTouch(laneIndex) {
+            if (!isGameRunning) return;
+            checkHit(laneIndex);
+        }
+
+        // 檢查打擊
+        function checkHit(laneIndex) {
+            const targetTime = gameStartTime + NOTE_SPEED * 0.9; // 目標線大約在90%的位置
+            const currentTime = performance.now();
+            const hitTimeOffset = currentTime - gameStartTime;
+
+            let hitNote = null;
+            let minTimeDiff = Infinity;
+
+            // 尋找最接近目標線的音符
+            for (const note of noteElements) {
+                if (parseInt(note.dataset.lane) === laneIndex) {
+                    const noteSpawnTime = parseFloat(note.dataset.spawnTime);
+                    const expectedHitTime = noteSpawnTime + NOTE_SPEED * 0.9;
+                    const timeDiff = Math.abs(currentTime - expectedHitTime);
+                    
+                    if (timeDiff < HIT_WINDOW && timeDiff < minTimeDiff) {
+                       minTimeDiff = timeDiff;
+                       hitNote = note;
+                    }
+                }
+            }
+            
+            if (hitNote) {
+                // 成功擊中
+                hitNote.remove();
+                noteElements = noteElements.filter(n => n !== hitNote);
+                
+                score += 100 + (combo * 5);
+                combo++;
+                if (combo > maxCombo) {
+                    maxCombo = combo;
+                }
+                updateScore();
+                updateCombo();
+                showHitEffect(laneIndex);
+                showFeedback("PERFECT");
+                
+                // 播放音效
+                synths[laneIndex].triggerAttackRelease(hitNotes[laneIndex], "8n");
+            }
+        }
+        
+        function breakCombo() {
+            combo = 0;
+            updateCombo();
+        }
+
+        function updateScore() {
+            scoreDisplay.textContent = score;
+        }
+
+        function updateCombo() {
+            if (combo > 1) {
+                comboDisplay.textContent = `${combo} COMBO`;
+                comboDisplay.style.transform = 'scale(1.1)';
+                setTimeout(() => {
+                    comboDisplay.style.transform = 'scale(1)';
+                }, 100);
+            } else {
+                comboDisplay.textContent = '';
+            }
+        }
+
+        function showHitEffect(laneIndex) {
+            const effect = document.createElement('div');
+            effect.className = `hit-effect ${HIT_EFFECT_COLORS[laneIndex]}`;
+            lanes[laneIndex].appendChild(effect);
+            setTimeout(() => effect.remove(), 300);
+        }
+
+        function showFeedback(text) {
+            const feedback = document.createElement('div');
+            feedback.className = 'feedback';
+            feedback.textContent = text;
+            if (text === "MISS") {
+                 feedback.style.color = '#ef4444'; // red-500
+            } else {
+                 feedback.style.color = '#a855f7'; // purple-500
+            }
+            feedbackContainer.appendChild(feedback);
+            setTimeout(() => feedback.remove(), 500);
+        }
+
+        // 事件監聽
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', init);
+        window.addEventListener('keydown', handleKeyPress);
+        
+        // 為觸控設備新增監聽器
+        lanes.forEach((lane, index) => {
+            lane.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // 防止觸控事件觸發滑鼠事件
+                handleTouch(index);
+            });
+        });
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>
