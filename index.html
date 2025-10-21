@@ -95,19 +95,34 @@
                 transform: translate(-50%, -100%) scale(1.2);
             }
         }
+        .song-item {
+            transition: all 0.2s ease-in-out;
+        }
+        .song-item:hover {
+            transform: scale(1.05);
+            background-color: rgba(168, 85, 247, 0.2); /* purple-500 with opacity */
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white flex items-center justify-center h-screen overflow-hidden">
 
     <div id="game-container" class="game-container bg-black shadow-2xl rounded-lg overflow-hidden relative">
+        <!-- 歌曲選擇畫面 -->
+        <div id="song-selection-screen" class="absolute inset-0 bg-gray-900/90 z-30 flex flex-col items-center justify-center p-8 text-center">
+            <h1 class="text-4xl font-bold mb-6">選擇歌曲</h1>
+            <div id="song-list" class="w-full max-w-sm space-y-3 overflow-y-auto" style="max-height: 70vh;">
+                <!-- 歌曲列表會動態插入這裡 -->
+            </div>
+        </div>
+
         <!-- 遊戲開始畫面 -->
-        <div id="start-screen" class="absolute inset-0 bg-gray-900/80 z-20 flex flex-col items-center justify-center p-8 text-center">
-            <h1 class="text-4xl font-bold mb-4">音樂打擊遊戲</h1>
-            <p class="text-lg text-gray-300 mb-8">當音符到達下方的打擊線時，按下對應的按鍵。</p>
+        <div id="start-screen" class="hidden absolute inset-0 bg-gray-900/80 z-20 flex flex-col items-center justify-center p-8 text-center">
+            <h2 id="selected-song-title" class="text-3xl font-bold mb-2"></h2>
+            <p id="selected-song-artist" class="text-lg text-gray-400 mb-6"></p>
             <button id="start-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-lg text-xl transition-transform transform hover:scale-105">
                 開始遊戲
             </button>
-            <div class="mt-8 text-gray-400">
+             <div class="mt-8 text-gray-400">
                 <p>使用按鍵：</p>
                 <div class="flex space-x-4 mt-2">
                     <kbd class="px-3 py-1 border rounded">D</kbd>
@@ -116,6 +131,7 @@
                     <kbd class="px-3 py-1 border rounded">K</kbd>
                 </div>
             </div>
+            <button id="back-to-selection" class="mt-8 text-gray-400 hover:text-white">返回歌曲選擇</button>
         </div>
 
         <!-- 遊戲結束畫面 -->
@@ -159,127 +175,253 @@
     </div>
 
     <script>
+        // DOM Elements
         const gameArea = document.getElementById('game-area');
         const lanes = [document.getElementById('lane-0'), document.getElementById('lane-1'), document.getElementById('lane-2'), document.getElementById('lane-3')];
         const scoreDisplay = document.getElementById('score');
         const comboDisplay = document.getElementById('combo');
         const feedbackContainer = document.getElementById('feedback-container');
         
+        const songSelectionScreen = document.getElementById('song-selection-screen');
+        const songListContainer = document.getElementById('song-list');
         const startScreen = document.getElementById('start-screen');
         const endScreen = document.getElementById('end-screen');
+        
         const startButton = document.getElementById('start-button');
         const restartButton = document.getElementById('restart-button');
+        const backButton = document.getElementById('back-to-selection');
+
         const finalScoreDisplay = document.getElementById('final-score');
         const finalComboDisplay = document.getElementById('final-combo');
+        const selectedSongTitle = document.getElementById('selected-song-title');
+        const selectedSongArtist = document.getElementById('selected-song-artist');
 
-        // 遊戲設定
-        const NOTE_SPEED = 4000; // ms, 音符從頂部到底部的時間
-        const HIT_WINDOW = 150; // ms, 完美打擊的時間窗口
+        // Game Settings
+        const NOTE_SPEED = 4000;
+        const HIT_WINDOW = 150;
         const LANE_KEYS = ['d', 'f', 'j', 'k'];
         const LANE_COLORS = ['bg-cyan-400', 'bg-pink-400', 'bg-yellow-400', 'bg-lime-400'];
         const HIT_EFFECT_COLORS = ['bg-cyan-400', 'bg-pink-400', 'bg-yellow-400', 'bg-lime-400'];
 
-        // 遊戲狀態
-        let score = 0;
-        let combo = 0;
-        let maxCombo = 0;
-        let gameStartTime = 0;
-        let isGameRunning = false;
-        let songTimer;
-        let noteElements = [];
+        // Game State
+        let score = 0, combo = 0, maxCombo = 0;
+        let gameStartTime = 0, isGameRunning = false;
+        let songTimer, noteElements = [], selectedSong;
 
-        // 歌曲資料 (time: 毫秒, lane: 軌道索引)
-        const songChart = [
-            { time: 1000, lane: 0 }, { time: 1500, lane: 1 }, { time: 2000, lane: 2 }, { time: 2500, lane: 3 },
-            { time: 3000, lane: 0 }, { time: 3250, lane: 1 }, { time: 3500, lane: 2 },
-            { time: 4000, lane: 3 }, { time: 4500, lane: 2 }, { time: 5000, lane: 1 }, { time: 5500, lane: 0 },
-            { time: 6000, lane: 1 }, { time: 6250, lane: 2 }, { time: 6500, lane: 1 },
-            { time: 7000, lane: 0 }, { time: 7000, lane: 3 },
-            { time: 7800, lane: 1 }, { time: 8000, lane: 2 },
-            { time: 8800, lane: 0 }, { time: 9000, lane: 3 },
-            { time: 9800, lane: 1 }, { time: 9800, lane: 2 },
-            { time: 10500, lane: 0 }, { time: 11000, lane: 1 }, { time: 11500, lane: 2 }, { time: 12000, lane: 3 },
-            { time: 12500, lane: 0 }, { time: 12750, lane: 1 }, { time: 13000, lane: 2 },
-            { time: 13500, lane: 3 }, { time: 13750, lane: 2 }, { time: 14000, lane: 1 },
-            { time: 14500, lane: 0 }, { time: 14500, lane: 3 },
-            { time: 15000, lane: 1 }, { time: 15000, lane: 2 },
+        // --- Song Data ---
+        const songs = [
+            {
+                title: "告白氣球",
+                artist: "周杰倫",
+                bpm: 92,
+                melody: [
+                    ['G4', '8n'], ['G4', '8n'], ['A4', '8n'], ['G4', '8n'], 
+                    ['E4', '4n'], ['D4', '4n'], null
+                ],
+                chart: [
+                    { time: 652, lane: 1 }, { time: 978, lane: 1 }, { time: 1304, lane: 2 }, { time: 1630, lane: 1 },
+                    { time: 1956, lane: 0 }, { time: 2608, lane: 3 }, { time: 2934, lane: 2 }, { time: 3260, lane: 1 },
+                    { time: 3913, lane: 0 }, { time: 3913, lane: 3 }, { time: 4239, lane: 1 }, { time: 4565, lane: 2 },
+                    { time: 5217, lane: 0 }, { time: 5543, lane: 1 }, { time: 5869, lane: 2 }, { time: 6195, lane: 1 },
+                ]
+            },
+            {
+                title: "光年之外",
+                artist: "鄧紫棋",
+                bpm: 140,
+                melody: [
+                    ['G4', '8n'], ['A4', '8n'], ['C5', '4n'], ['C5', '8n'], 
+                    ['A4', '8n'], ['G4', '8n'], ['F4', '4n']
+                ],
+                chart: [
+                    { time: 428, lane: 0 }, { time: 642, lane: 1 }, { time: 857, lane: 2 }, { time: 1285, lane: 2 },
+                    { time: 1500, lane: 1 }, { time: 1714, lane: 0 }, { time: 2142, lane: 3 }, { time: 2571, lane: 1 },
+                    { time: 2785, lane: 2 }, { time: 3000, lane: 0 }, { time: 3428, lane: 1 }, { time: 3428, lane: 3 },
+                    { time: 3857, lane: 2 }, { time: 4071, lane: 1 }, { time: 4285, lane: 0 }, { time: 4714, lane: 3 },
+                ]
+            },
+            {
+                title: "那些年",
+                artist: "胡夏",
+                bpm: 128,
+                melody: [['G4', '4n'], ['A4', '4n'], ['B4', '4n'], ['C5', '4n'], ['B4', '4n'], ['A4', '2n']],
+                chart: [
+                    { time: 468, lane: 0 }, { time: 937, lane: 1 }, { time: 1406, lane: 2 }, { time: 1875, lane: 3 },
+                    { time: 2343, lane: 2 }, { time: 2812, lane: 1 },
+                    { time: 3750, lane: 0 }, { time: 4218, lane: 1 }, { time: 4687, lane: 0 }, { time: 5156, lane: 2 },
+                    { time: 5625, lane: 1 }, { time: 6093, lane: 3 }, { time: 6562, lane: 0 },
+                ]
+            },
+            {
+                title: "小蘋果",
+                artist: "筷子兄弟",
+                bpm: 128,
+                melody: [['E4', '8n'], ['E4', '8n'], ['F4', '8n'], ['D4', '8n'], ['E4', '4n'], ['C4', '4n']],
+                chart: [
+                    { time: 468, lane: 0 }, { time: 703, lane: 0 }, { time: 937, lane: 1 }, { time: 1171, lane: 3 },
+                    { time: 1406, lane: 0 }, { time: 1875, lane: 2 },
+                    { time: 2343, lane: 1 }, { time: 2578, lane: 1 }, { time: 2812, lane: 2 }, { time: 3046, lane: 0 },
+                    { time: 3281, lane: 1 }, { time: 3750, lane: 3 },
+                    { time: 4218, lane: 0 }, { time: 4218, lane: 2 }, { time: 4687, lane: 1 }, { time: 4687, lane: 3 },
+                ]
+            },
+            {
+                title: "夜に駆ける",
+                artist: "YOASOBI",
+                bpm: 130,
+                melody: [
+                    ['G#4', '16n'], ['C#5', '16n'], ['D#5', '8n'], ['G#4', '16n'], 
+                    ['C#5', '16n'], ['D#5', '8n'], ['F5', '8n']
+                ],
+                chart: [
+                    { time: 461, lane: 0 }, { time: 576, lane: 2 }, { time: 692, lane: 3 }, { time: 923, lane: 0 },
+                    { time: 1038, lane: 2 }, { time: 1153, lane: 3 }, { time: 1384, lane: 1 },
+                    { time: 1846, lane: 0 }, { time: 1961, lane: 2 }, { time: 2076, lane: 3 }, { time: 2307, lane: 0 },
+                    { time: 2423, lane: 2 }, { time: 2538, lane: 3 }, { time: 2769, lane: 1 },
+                    { time: 3000, lane: 0 }, { time: 3000, lane: 3 }, { time: 3230, lane: 1 }, { time: 3230, lane: 2 },
+                ]
+            },
+            {
+                title: "紅蓮華",
+                artist: "LiSA",
+                bpm: 135,
+                melody: [
+                    ['F#4', '8n'], ['F#4', '8n'], ['G#4', '8n'], ['A#4', '4n'], 
+                    ['G#4', '8n'], ['F#4', '4n'], null
+                ],
+                chart: [
+                    { time: 444, lane: 1 }, { time: 666, lane: 1 }, { time: 888, lane: 2 }, { time: 1111, lane: 3 },
+                    { time: 1555, lane: 2 }, { time: 1777, lane: 1 }, { time: 2222, lane: 0 },
+                    { time: 2666, lane: 1 }, { time: 2888, lane: 2 }, { time: 3110, lane: 1 }, { time: 3333, lane: 2 },
+                    { time: 3555, lane: 3 }, { time: 4000, lane: 0 }, { time: 4000, lane: 3 },
+                    { time: 4444, lane: 1 }, { time: 4666, lane: 2 }, { time: 4888, lane: 1 },
+                ]
+            },
+            {
+                title: "Idol (アイドル)",
+                artist: "YOASOBI",
+                bpm: 166,
+                melody: [['B5', '8n'], ['B5', '8n'], ['B5', '8n'], ['B5', '8n'], ['C#6', '4n']],
+                chart: [
+                    { time: 361, lane: 0 }, { time: 542, lane: 1 }, { time: 722, lane: 2 }, { time: 903, lane: 3 },
+                    { time: 1084, lane: 0 }, { time: 1265, lane: 1 }, { time: 1445, lane: 2 }, { time: 1626, lane: 3 },
+                    { time: 1807, lane: 0 }, { time: 1807, lane: 2 }, { time: 2168, lane: 1 }, { time: 2168, lane: 3 },
+                    { time: 2529, lane: 0 }, { time: 2710, lane: 1 }, { time: 2891, lane: 2 }, { time: 3072, lane: 3 },
+                    { time: 3253, lane: 0 }, { time: 3433, lane: 2 }, { time: 3614, lane: 1 }, { time: 3795, lane: 3 },
+                ]
+            },
+            {
+                title: "Lemon",
+                artist: "米津玄師",
+                bpm: 170,
+                melody: [['F4', '8n'], ['G4', '8n'], ['A4', '8n'], ['C5', '4n'], ['A4', '8n'], ['G4', '4n']],
+                chart: [
+                    { time: 352, lane: 0 }, { time: 705, lane: 1 }, { time: 1058, lane: 2 }, { time: 1411, lane: 3 },
+                    { time: 1764, lane: 2 }, { time: 2117, lane: 1 },
+                    { time: 2823, lane: 0 }, { time: 3176, lane: 1 }, { time: 3529, lane: 2 }, { time: 3882, lane: 0 },
+                    { time: 4235, lane: 3 }, { time: 4588, lane: 1 },
+                    { time: 4941, lane: 0 }, { time: 4941, lane: 3 }, { time: 5294, lane: 1 }, { time: 5294, lane: 2 },
+                ]
+            }
         ];
-        
-        // 音效合成器
-        const synths = [
-            new Tone.Synth().toDestination(),
-            new Tone.Synth().toDestination(),
-            new Tone.Synth().toDestination(),
-            new Tone.Synth().toDestination(),
-        ];
-        synths[0].oscillator.type = "sine";
-        synths[1].oscillator.type = "triangle";
-        synths[2].oscillator.type = "square";
-        synths[3].oscillator.type = "sawtooth";
+
+        // --- Audio Synths ---
+        const hitSynths = [ new Tone.Synth().toDestination(), new Tone.Synth().toDestination(), new Tone.Synth().toDestination(), new Tone.Synth().toDestination() ];
+        hitSynths[0].oscillator.type = "sine"; hitSynths[1].oscillator.type = "triangle"; hitSynths[2].oscillator.type = "square"; hitSynths[3].oscillator.type = "sawtooth";
         const hitNotes = ["C4", "E4", "G4", "B4"];
+        const melodySynth = new Tone.MembraneSynth().toDestination();
+        let melodySequence;
 
-        // 初始化遊戲
+        // --- Game Flow Functions ---
+
         function init() {
-            score = 0;
-            combo = 0;
-            maxCombo = 0;
-            isGameRunning = false;
+            score = 0; combo = 0; maxCombo = 0; isGameRunning = false;
             noteElements.forEach(note => note.remove());
             noteElements = [];
             clearTimeout(songTimer);
-            updateScore();
-            updateCombo();
+            if (melodySequence) melodySequence.stop();
+            Tone.Transport.stop();
+
+            updateScore(); updateCombo();
+            
             endScreen.classList.add('hidden');
+            startScreen.classList.add('hidden');
+            songSelectionScreen.classList.remove('hidden');
+        }
+
+        function populateSongList() {
+            songListContainer.innerHTML = ''; // Clear previous list
+            songs.forEach((song, index) => {
+                const songElement = document.createElement('button');
+                songElement.className = 'song-item w-full p-4 border border-gray-600 rounded-lg text-left';
+                songElement.innerHTML = `
+                    <p class="text-lg font-bold">${song.title}</p>
+                    <p class="text-sm text-gray-400">${song.artist}</p>
+                `;
+                songElement.onclick = () => selectSong(index);
+                songListContainer.appendChild(songElement);
+            });
+        }
+        
+        function selectSong(index) {
+            selectedSong = songs[index];
+            selectedSongTitle.textContent = selectedSong.title;
+            selectedSongArtist.textContent = selectedSong.artist;
+            
+            songSelectionScreen.classList.add('hidden');
             startScreen.classList.remove('hidden');
         }
 
-        // 開始遊戲
         function startGame() {
-            // 需要用戶互動才能啟動音訊
             Tone.start(); 
             
             startScreen.classList.add('hidden');
             isGameRunning = true;
             gameStartTime = performance.now();
 
-            songChart.forEach(noteData => {
+            // Play music
+            Tone.Transport.bpm.value = selectedSong.bpm;
+            melodySequence = new Tone.Sequence((time, note) => {
+                if (note) melodySynth.triggerAttackRelease(note[0], note[1], time);
+            }, selectedSong.melody, "4n").start(0);
+            Tone.Transport.start();
+
+            // Drop notes
+            selectedSong.chart.forEach(noteData => {
                 setTimeout(() => {
                     if(isGameRunning) createNote(noteData.lane);
                 }, noteData.time);
             });
             
-            // 遊戲結束計時器
-            const gameDuration = songChart[songChart.length - 1].time + NOTE_SPEED + 500;
+            // End game timer
+            const gameDuration = selectedSong.chart[selectedSong.chart.length - 1].time + NOTE_SPEED + 500;
             songTimer = setTimeout(endGame, gameDuration);
         }
 
-        // 結束遊戲
         function endGame() {
             isGameRunning = false;
+            if (melodySequence) melodySequence.stop();
+            Tone.Transport.stop();
+
             finalScoreDisplay.textContent = score;
             finalComboDisplay.textContent = `最大連擊: ${maxCombo}`;
             endScreen.classList.remove('hidden');
         }
 
-        // 創建音符
+        // --- Note and Hit Logic ---
+
         function createNote(laneIndex) {
             const note = document.createElement('div');
             note.className = `note ${LANE_COLORS[laneIndex]}`;
             note.style.transform = `translateY(-100%)`;
-            
-            // 附加其他數據到元素上
             note.dataset.spawnTime = performance.now();
             note.dataset.lane = laneIndex;
-
             lanes[laneIndex].appendChild(note);
             noteElements.push(note);
-
-            // 觸發CSS動畫
             requestAnimationFrame(() => {
                  note.style.transform = `translateY(calc(${gameArea.clientHeight}px))`;
             });
             
-            // 音符到達底部後自動移除 (如果未被擊中)
             setTimeout(() => {
                 if (note.parentElement) {
                     note.remove();
@@ -292,15 +434,10 @@
             }, NOTE_SPEED);
         }
         
-        // 處理玩家輸入
         function handleKeyPress(e) {
             if (!isGameRunning) return;
-            const key = e.key.toLowerCase();
-            const laneIndex = LANE_KEYS.indexOf(key);
-
-            if (laneIndex !== -1) {
-                checkHit(laneIndex);
-            }
+            const laneIndex = LANE_KEYS.indexOf(e.key.toLowerCase());
+            if (laneIndex !== -1) checkHit(laneIndex);
         }
         
         function handleTouch(laneIndex) {
@@ -308,22 +445,15 @@
             checkHit(laneIndex);
         }
 
-        // 檢查打擊
         function checkHit(laneIndex) {
-            const targetTime = gameStartTime + NOTE_SPEED * 0.9; // 目標線大約在90%的位置
             const currentTime = performance.now();
-            const hitTimeOffset = currentTime - gameStartTime;
-
             let hitNote = null;
             let minTimeDiff = Infinity;
 
-            // 尋找最接近目標線的音符
             for (const note of noteElements) {
                 if (parseInt(note.dataset.lane) === laneIndex) {
-                    const noteSpawnTime = parseFloat(note.dataset.spawnTime);
-                    const expectedHitTime = noteSpawnTime + NOTE_SPEED * 0.9;
+                    const expectedHitTime = parseFloat(note.dataset.spawnTime) + NOTE_SPEED * 0.9;
                     const timeDiff = Math.abs(currentTime - expectedHitTime);
-                    
                     if (timeDiff < HIT_WINDOW && timeDiff < minTimeDiff) {
                        minTimeDiff = timeDiff;
                        hitNote = note;
@@ -332,41 +462,27 @@
             }
             
             if (hitNote) {
-                // 成功擊中
                 hitNote.remove();
                 noteElements = noteElements.filter(n => n !== hitNote);
-                
                 score += 100 + (combo * 5);
                 combo++;
-                if (combo > maxCombo) {
-                    maxCombo = combo;
-                }
+                if (combo > maxCombo) maxCombo = combo;
                 updateScore();
                 updateCombo();
                 showHitEffect(laneIndex);
                 showFeedback("PERFECT");
-                
-                // 播放音效
-                synths[laneIndex].triggerAttackRelease(hitNotes[laneIndex], "8n");
+                hitSynths[laneIndex].triggerAttackRelease(hitNotes[laneIndex], "8n");
             }
         }
         
-        function breakCombo() {
-            combo = 0;
-            updateCombo();
-        }
-
-        function updateScore() {
-            scoreDisplay.textContent = score;
-        }
-
+        // --- UI Updates ---
+        function breakCombo() { combo = 0; updateCombo(); }
+        function updateScore() { scoreDisplay.textContent = score; }
         function updateCombo() {
             if (combo > 1) {
                 comboDisplay.textContent = `${combo} COMBO`;
                 comboDisplay.style.transform = 'scale(1.1)';
-                setTimeout(() => {
-                    comboDisplay.style.transform = 'scale(1)';
-                }, 100);
+                setTimeout(() => { comboDisplay.style.transform = 'scale(1)'; }, 100);
             } else {
                 comboDisplay.textContent = '';
             }
@@ -383,30 +499,27 @@
             const feedback = document.createElement('div');
             feedback.className = 'feedback';
             feedback.textContent = text;
-            if (text === "MISS") {
-                 feedback.style.color = '#ef4444'; // red-500
-            } else {
-                 feedback.style.color = '#a855f7'; // purple-500
-            }
+            feedback.style.color = text === "MISS" ? '#ef4444' : '#a855f7';
             feedbackContainer.appendChild(feedback);
             setTimeout(() => feedback.remove(), 500);
         }
 
-        // 事件監聽
+        // --- Event Listeners ---
         startButton.addEventListener('click', startGame);
         restartButton.addEventListener('click', init);
+        backButton.addEventListener('click', init);
         window.addEventListener('keydown', handleKeyPress);
-        
-        // 為觸控設備新增監聽器
         lanes.forEach((lane, index) => {
             lane.addEventListener('touchstart', (e) => {
-                e.preventDefault(); // 防止觸控事件觸發滑鼠事件
+                e.preventDefault();
                 handleTouch(index);
             });
         });
 
-        // 初始化
+        // --- Initial Load ---
+        populateSongList();
         init();
     </script>
 </body>
 </html>
+
